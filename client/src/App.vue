@@ -279,24 +279,26 @@ const FALLBACK_COVERS = [
 ];
 
 // Check URL for room code on mount
-onMounted(async () => {
+// Check URL for room code on mount
+onMounted(() => {
+    // 1. Setup socket listeners IMMEDIATELY (Don't wait for slow API)
+    setupSocketListeners();
+
     const urlParams = new URLSearchParams(window.location.search);
     const urlRoomCode = urlParams.get('room');
     if (urlRoomCode) {
         joinRoomCode.value = urlRoomCode.toUpperCase();
+        isJoiningViaLink.value = true;
         gameState.value = 'PSEUDO_INPUT';
     }
     
-    // Fetch covers for solo mode
-    const fetchedCovers = await fetchGameCovers();
-    if (fetchedCovers && fetchedCovers.length > 0) {
-        covers.value = fetchedCovers;
-    } else {
-        covers.value = FALLBACK_COVERS;
-    }
-    
-    // Socket event listeners
-    setupSocketListeners();
+    // 2. Fetch covers for solo mode in background
+    fetchGameCovers().then(res => {
+        if (res && res.length > 0) covers.value = res;
+        else covers.value = [...FALLBACK_COVERS];
+    }).catch(() => {
+        covers.value = [...FALLBACK_COVERS];
+    });
 });
 
 onUnmounted(() => {
