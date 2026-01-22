@@ -50,12 +50,19 @@
                 maxlength="15"
             />
             <div class="flex flex-col gap-3">
-                <button @click="createRoom" :disabled="!myPseudo.trim()" class="w-full py-4 bg-green-500 text-black font-black text-xl rounded-full hover:bg-green-400 transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
-                    CRÉER UNE PARTIE
-                </button>
-                <button @click="gameState = 'JOIN_ROOM'" :disabled="!myPseudo.trim()" class="w-full py-4 border border-white/20 text-white font-black rounded-full hover:bg-white/10 transition-colors disabled:opacity-50">
-                    REJOINDRE UNE PARTIE
-                </button>
+                <template v-if="isJoiningViaLink">
+                    <button @click="joinRoom" :disabled="!myPseudo.trim()" class="w-full py-4 bg-green-500 text-black font-black text-xl rounded-full hover:bg-green-400 transition-colors">
+                        REJOINDRE LA PARTIE
+                    </button>
+                </template>
+                <template v-else>
+                    <button @click="createRoom" :disabled="!myPseudo.trim()" class="w-full py-4 bg-green-500 text-black font-black text-xl rounded-full hover:bg-green-400 transition-colors disabled:opacity-50">
+                        CRÉER UNE PARTIE
+                    </button>
+                    <button @click="gameState = 'JOIN_ROOM'" :disabled="!myPseudo.trim()" class="w-full py-4 border border-white/20 text-white font-black rounded-full hover:bg-white/10 transition-colors disabled:opacity-50">
+                        REJOINDRE UNE PARTIE
+                    </button>
+                </template>
             </div>
             <button @click="goHome" class="text-gray-500 hover:text-white transition-colors">← Retour</button>
         </div>
@@ -209,6 +216,11 @@
 
     </div>
 
+    <!-- Server Indicator -->
+    <div class="absolute bottom-4 left-4 flex items-center gap-2 text-[10px] font-mono text-gray-500 uppercase tracking-widest opacity-50">
+        <div :class="['w-2 h-2 rounded-full', isConnected ? 'bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.6)]' : 'bg-red-500']"></div>
+        {{ isLocal ? 'Local Server' : 'Production' }}
+    </div>
   </div>
 </template>
 
@@ -244,9 +256,11 @@ const currentRound = ref({
     id: null
 });
 
-// Timer
-const timeLeft = ref(20);
-let timerInterval = null;
+const isJoiningViaLink = ref(false);
+const isConnected = ref(false);
+
+const apiBaseUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000';
+const isLocal = computed(() => apiBaseUrl.includes('localhost'));
 
 const covers = ref([]);
 
@@ -290,7 +304,12 @@ onUnmounted(() => {
 function setupSocketListeners() {
     socket.on('connect', () => {
         mySocketId.value = socket.id;
+        isConnected.value = true;
         console.log('Connected with ID:', socket.id);
+    });
+
+    socket.on('disconnect', () => {
+        isConnected.value = false;
     });
     
     socket.on('room_created', (data) => {
@@ -467,6 +486,9 @@ const goHome = () => {
     players.value = [];
     hostId.value = '';
     errorMessage.value = '';
+    isJoiningViaLink.value = false;
+    // Clear URL params
+    window.history.replaceState({}, document.title, window.location.pathname);
     disconnectSocket();
 };
 </script>
