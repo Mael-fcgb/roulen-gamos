@@ -39,8 +39,10 @@ app.get('/api/covers', async (req, res) => {
 
         const tracks = tracksResponse.data.data;
         if (!tracks || tracks.length === 0) {
+            console.warn(`No tracks found for user ${userId}`);
             return res.status(404).json({ error: 'No tracks found' });
         }
+        console.log(`Found ${tracks.length} tracks for user ${userId}`);
 
         // 2. Extract unique albums
         const uniqueAlbums = new Map();
@@ -58,6 +60,7 @@ app.get('/api/covers', async (req, res) => {
                 }
             }
         });
+        console.log(`Extracted ${uniqueAlbums.size} unique albums from tracks`);
 
         // 3. Shuffle the ENTIRE pool of unique albums
         const albumCandidates = Array.from(uniqueAlbums.values());
@@ -88,6 +91,7 @@ app.get('/api/covers', async (req, res) => {
                 cover: item.cover
             }));
 
+        console.log(`Returning ${validAlbums.length} valid albums after verification (nb_tracks >= 3)`);
         res.json(validAlbums);
 
     } catch (error) {
