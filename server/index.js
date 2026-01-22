@@ -107,59 +107,207 @@ const io = new Server(server, {
     }
 });
 
-// Store rooms and basic game state
-// roomCode => { players: [], gameState: 'WAITING'|'PLAYING', currentRound: 0, ... }
+// Store rooms and game state
+// roomCode => { players, gameState, currentRound, covers, roundTimer, hostId }
 const rooms = new Map();
+
+// Helper: Fetch covers for a room
+async function fetchCoversForRoom() {
+    try {
+        const userId = '5654460941';
+        const tracksResponse = await axios.get(`https://api.deezer.com/user/${userId}/tracks`, {
+            params: { limit: 2000 }
+        });
+        const tracks = tracksResponse.data.data || [];
+
+        const uniqueAlbums = new Map();
+        tracks.forEach(track => {
+            if (track.album && track.artist && !uniqueAlbums.has(track.album.id)) {
+                uniqueAlbums.set(track.album.id, {
+                    id: track.album.id,
+                    title: track.album.title,
+                    artist: track.artist.name,
+                    cover: track.album.cover_xl || track.album.cover_big || track.album.cover_medium || track.album.cover
+                });
+            }
+        });
+
+        // Shuffle
+        const albums = Array.from(uniqueAlbums.values());
+        for (let i = albums.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [albums[i], albums[j]] = [albums[j], albums[i]];
+        }
+        return albums.slice(0, 30); // Limit to 30 rounds max
+    } catch (error) {
+        console.error("Error fetching covers for room:", error.message);
+        return [];
+    }
+}
+
+// Helper: Start a new round
+function startRound(roomCode) {
+    const room = rooms.get(roomCode);
+    if (!room || room.covers.length === 0) {
+        io.to(roomCode).emit('game_over', { players: room?.players || [] });
+        return;
+    }
+
+    room.currentRound = room.covers.pop();
+    room.gameState = 'PLAYING';
+    room.timeLeft = 20;
+
+    io.to(roomCode).emit('round_start', {
+        cover: room.currentRound.cover,
+        timeLeft: room.timeLeft,
+        players: room.players
+    });
+
+    // Timer countdown
+    if (room.roundTimer) clearInterval(room.roundTimer);
+    room.roundTimer = setInterval(() => {
+        room.timeLeft -= 1;
+        io.to(roomCode).emit('timer_tick', room.timeLeft);
+
+        if (room.timeLeft <= 0) {
+            clearInterval(room.roundTimer);
+            room.gameState = 'ROUND_END';
+            io.to(roomCode).emit('round_end', {
+                winner: null,
+                answer: room.currentRound,
+                players: room.players
+            });
+
+            // Auto-start next round after 3 seconds
+            setTimeout(() => {
+                if (rooms.has(roomCode)) startRound(roomCode);
+            }, 3000);
+        }
+    }, 1000);
+}
 
 io.on('connection', (socket) => {
     console.log('User connected:', socket.id);
 
-    socket.on('create_room', () => {
-        // Generate simple 4-char room code
+    // Create a new room
+    socket.on('create_room', (pseudo) => {
         const roomCode = Math.random().toString(36).substring(2, 6).toUpperCase();
         rooms.set(roomCode, {
-            players: [{ id: socket.id, score: 0, name: 'Host' }],
+            players: [{ id: socket.id, pseudo: pseudo || 'Hôte', score: 0 }],
             gameState: 'WAITING',
-            currentImage: null
+            currentRound: null,
+            covers: [],
+            roundTimer: null,
+            hostId: socket.id
         });
         socket.join(roomCode);
-        socket.emit('room_created', roomCode);
+        socket.roomCode = roomCode;
+        socket.emit('room_created', { roomCode, players: rooms.get(roomCode).players });
+        console.log(`Room ${roomCode} created by ${pseudo}`);
     });
 
-    socket.on('join_room', (roomCode) => {
-        if (rooms.has(roomCode)) {
-            const room = rooms.get(roomCode);
-            room.players.push({ id: socket.id, score: 0, name: `Player ${room.players.length + 1}` });
-            socket.join(roomCode); // User joins the socket room
-            io.to(roomCode).emit('player_joined', room.players); // Notify everyone in room
-            socket.emit('joined_success', roomCode);
-        } else {
-            socket.emit('error', 'Room not found');
+    // Join existing room
+    socket.on('join_room', ({ roomCode, pseudo }) => {
+        const room = rooms.get(roomCode);
+        if (!room) {
+            socket.emit('error', { message: 'Salle introuvable' });
+            return;
         }
+        if (room.gameState !== 'WAITING') {
+            socket.emit('error', { message: 'La partie a déjà commencé' });
+            return;
+        }
+
+        room.players.push({ id: socket.id, pseudo: pseudo || `Joueur ${room.players.length + 1}`, score: 0 });
+        socket.join(roomCode);
+        socket.roomCode = roomCode;
+
+        io.to(roomCode).emit('player_joined', { players: room.players });
+        socket.emit('joined_success', { roomCode, players: room.players, hostId: room.hostId });
+        console.log(`${pseudo} joined room ${roomCode}`);
     });
 
+    // Host starts the game
     socket.on('start_game', async (roomCode) => {
-        if (rooms.has(roomCode)) {
-            console.log("Starting game for room", roomCode);
-            const room = rooms.get(roomCode);
-            room.gameState = 'PLAYING';
-            // Mock fetch simple image
-            // In real implementation, this comes from Deezer API
-            room.currentImage = {
-                cover: "https://e-cdns-images.dzcdn.net/images/cover/2e018122cb56c86277102d506a77d33b/500x500-000000-80-0-0.jpg",
-                artist: "Eminem",
-                title: "The Eminem Show"
-            };
+        const room = rooms.get(roomCode);
+        if (!room) return;
+        if (socket.id !== room.hostId) {
+            socket.emit('error', { message: 'Seul l\'hôte peut lancer la partie' });
+            return;
+        }
+        if (room.players.length < 2) {
+            socket.emit('error', { message: 'Il faut au moins 2 joueurs' });
+            return;
+        }
 
-            io.to(roomCode).emit('game_started', room.currentImage);
+        console.log(`Starting game for room ${roomCode}`);
+        room.covers = await fetchCoversForRoom();
 
-            // Start countdown logic here if needed
+        if (room.covers.length === 0) {
+            socket.emit('error', { message: 'Impossible de charger les covers' });
+            return;
+        }
+
+        io.to(roomCode).emit('game_starting');
+        setTimeout(() => startRound(roomCode), 1500);
+    });
+
+    // Player submits a guess
+    socket.on('submit_guess', ({ roomCode, albumTitle }) => {
+        const room = rooms.get(roomCode);
+        if (!room || room.gameState !== 'PLAYING') return;
+
+        const targetTitle = room.currentRound.title.toLowerCase();
+        const guessTitle = albumTitle.toLowerCase();
+
+        // Fuzzy match
+        if (guessTitle.includes(targetTitle) || targetTitle.includes(guessTitle)) {
+            // Winner found!
+            clearInterval(room.roundTimer);
+
+            const winner = room.players.find(p => p.id === socket.id);
+            if (winner) winner.score += 1;
+
+            room.gameState = 'ROUND_END';
+            io.to(roomCode).emit('round_end', {
+                winner: winner ? { pseudo: winner.pseudo, id: winner.id } : null,
+                answer: room.currentRound,
+                players: room.players
+            });
+
+            console.log(`${winner?.pseudo} found the answer in room ${roomCode}`);
+
+            // Auto-start next round after 3 seconds
+            setTimeout(() => {
+                if (rooms.has(roomCode)) startRound(roomCode);
+            }, 3000);
         }
     });
 
+    // Handle disconnection
     socket.on('disconnect', () => {
         console.log('User disconnected:', socket.id);
-        // Cleanup logic would go here
+        const roomCode = socket.roomCode;
+        if (!roomCode || !rooms.has(roomCode)) return;
+
+        const room = rooms.get(roomCode);
+        room.players = room.players.filter(p => p.id !== socket.id);
+
+        if (room.players.length === 0) {
+            // Delete empty room
+            if (room.roundTimer) clearInterval(room.roundTimer);
+            rooms.delete(roomCode);
+            console.log(`Room ${roomCode} deleted (empty)`);
+        } else {
+            // Notify remaining players
+            io.to(roomCode).emit('player_left', { players: room.players });
+
+            // If host left, assign new host
+            if (socket.id === room.hostId) {
+                room.hostId = room.players[0].id;
+                io.to(roomCode).emit('new_host', { hostId: room.hostId });
+            }
+        }
     });
 });
 
