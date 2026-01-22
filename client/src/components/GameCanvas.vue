@@ -22,11 +22,11 @@ const props = defineProps({
   },
   timeLeft: {
     type: Number,
-    default: 10
+    default: 20
   },
   maxTime: {
     type: Number,
-    default: 10
+    default: 20
   }
 });
 
@@ -38,10 +38,19 @@ let isImageLoaded = false;
 watch(() => props.imageUrl, (newUrl) => {
     isImageLoaded = false;
     imageObj.crossOrigin = "Anonymous";
+    if (!newUrl) {
+        console.warn("GameCanvas: Received empty imageUrl");
+        return;
+    }
+    console.log("GameCanvas: Loading image:", newUrl);
     imageObj.src = newUrl;
     imageObj.onload = () => {
+        console.log("GameCanvas: Image loaded successfully");
         isImageLoaded = true;
         drawPixelated();
+    };
+    imageObj.onerror = (err) => {
+        console.error("GameCanvas: Failed to load image", newUrl, err);
     };
 }, { immediate: true });
 

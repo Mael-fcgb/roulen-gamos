@@ -111,14 +111,33 @@ const io = new Server(server, {
 // roomCode => { players, gameState, currentRound, covers, roundTimer, hostId }
 const rooms = new Map();
 
+// 5. Caching logic for performance
+let cachedTracks = null;
+let lastCacheTime = 0;
+const CACHE_DURATION = 30 * 60 * 1000; // 30 minutes
+
+async function getDeezerTracks() {
+    const now = Date.now();
+    if (cachedTracks && (now - lastCacheTime < CACHE_DURATION)) {
+        console.log("Using cached Deezer tracks");
+        return cachedTracks;
+    }
+
+    console.log("Fetching fresh Deezer tracks...");
+    const userId = '5654460941';
+    const response = await axios.get(`https://api.deezer.com/user/${userId}/tracks`, {
+        params: { limit: 2000 }
+    });
+    cachedTracks = response.data.data || [];
+    lastCacheTime = now;
+    return cachedTracks;
+}
+
 // Helper: Fetch covers for a room
 async function fetchCoversForRoom() {
     try {
-        const userId = '5654460941';
-        const tracksResponse = await axios.get(`https://api.deezer.com/user/${userId}/tracks`, {
-            params: { limit: 2000 }
-        });
-        const tracks = tracksResponse.data.data || [];
+        const tracks = await getDeezerTracks();
+        if (tracks.length === 0) return [];
 
         const uniqueAlbums = new Map();
         tracks.forEach(track => {
