@@ -1,8 +1,10 @@
 import { io } from 'socket.io-client';
 
-const SOCKET_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
+const PROD_URL = 'https://roulen-gamos-server.onrender.com';
+const isNetlify = window.location.hostname.includes('netlify.app');
+const SOCKET_URL = import.meta.env.VITE_API_URL || (isNetlify ? PROD_URL : 'http://localhost:3000');
 
-console.log('Socket connecting to:', SOCKET_URL);
+console.log('Socket se connecte à:', SOCKET_URL);
 
 export const socket = io(SOCKET_URL, {
     autoConnect: false

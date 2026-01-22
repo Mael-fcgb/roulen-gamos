@@ -6,9 +6,11 @@ import axios from 'axios';
 // Let's implement client-side first and check CORS. 
 // If CORS fails, we'll route through our Node server (which is safer anyway).
 
-const API_URL = (import.meta.env.VITE_API_URL || 'http://localhost:3000') + '/api';
+const PROD_URL = 'https://roulen-gamos-server.onrender.com';
+const isNetlify = window.location.hostname.includes('netlify.app');
+const API_URL = (import.meta.env.VITE_API_URL || (isNetlify ? PROD_URL : 'http://localhost:3000')) + '/api';
 
-console.log("Configured API URL:", API_URL);
+console.log("Connecté au serveur API:", API_URL);
 
 export const searchTracks = async (query) => {
     try {
